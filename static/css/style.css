@@ -23,8 +23,11 @@ body {
 	background: #94a3b8; /* slate-400 */
 }
 
-/* Smooth transition for collapsible section */
-#raw-data-content {
+/* UPDATED: Added #plot-section-content to this rule
+  Smooth transition for collapsible sections 
+*/
+#raw-data-content,
+#plot-section-content {
 	transition: max-height 0.5s ease-in-out, padding 0.5s ease-in-out;
 }
 

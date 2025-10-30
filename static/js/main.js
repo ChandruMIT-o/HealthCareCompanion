@@ -1,263 +1,272 @@
-document.addEventListener("DOMContentLoaded", () => {
-	// --- DOM Element References ---
-	const connectBtn = document.getElementById("connect-btn");
-	const dataDisplayArea = document.getElementById("data-display-area");
-	const initialMessage = document.getElementById("initial-message");
-	const rawDataHeader = document.getElementById("raw-data-header");
-	const rawDataContent = document.getElementById("raw-data-content");
-	const toggleIcon = document.getElementById("toggle-icon");
-	const rawDataLog = document.getElementById("raw-data-log");
-	const transformedDataBody = document.getElementById(
-		"transformed-data-body"
-	);
-	const modelsGrid = document.getElementById("models-grid");
-	const scoreLogBody = document.getElementById("score-log-body");
+// Import all modules and components
+import * as api from "./modules/api.js";
+import * as ui from "./modules/uiManager.js";
 
-	let isConnected = false;
-	let dataInterval;
-	const MAX_TRANSFORMED_ENTRIES = 10;
-	const MAX_SCORE_LOG_ENTRIES = 50;
+// Import all your plot classes
+import { HrPlot } from "./components/HrPlot.js";
+import { IbiPlot } from "./components/IbiPlot.js";
+import { Spo2Plot } from "./components/Spo2Plot.js";
+import { SkinTempPlot } from "./components/SkinTempPlot.js";
+import { EdaPlot } from "./components/EdaPlot.js";
+import { EcgPlot } from "./components/EcgPlot.js";
+import { BvpPlot } from "./components/BvpPlot.js";
+import { PpgGreenPlot } from "./components/PpgGreenPlot.js";
+import { PpgRedPlot } from "./components/PpgRedPlot.js";
+import { PpgIrPlot } from "./components/PpgIrPlot.js";
+import { AccXPlot } from "./components/AccXPlot.js";
+import { AccYPlot } from "./components/AccYPlot.js";
+import { AccZPlot } from "./components/AccZPlot.js";
+import { RespirationRatePlot } from "./components/RespirationRatePlot.js";
 
-	// --- Event Listeners ---
-	connectBtn.addEventListener("click", handleConnectionToggle);
-	rawDataHeader.addEventListener("click", toggleRawDataSection);
+// --- Global State ---
+let isConnected = false;
+let dataInterval = null;
+let allPlots = {};
+const CHART_FEATURES = [
+	"hr",
+	"ibi",
+	"spo2",
+	"skinTemp",
+	"eda",
+	"ecg",
+	"bvp",
+	"ppgGreen",
+	"ppgRed",
+	"ppgIr",
+	"accX",
+	"accY",
+	"accZ",
+	"respirationRate",
+];
 
-	// --- Functions ---
-	/**
-	 * Toggles the connection state and starts/stops data fetching and logging.
-	 */
-	function handleConnectionToggle() {
-		if (isConnected) {
-			disconnect();
-		} else {
-			connect();
-		}
-	}
+// --- Initialization ---
+window.addEventListener("load", () => {
+	// Call the init function *first* to populate ui.dom
+	ui.initUIManager();
 
-	/**
-	 * Sends a request to the backend to start/stop logging.
-	 * @param {boolean} connectState - True to start logging, false to stop.
-	 */
-	async function toggleLogging(connectState) {
-		try {
-			await fetch("/toggle_logging", {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ connect: connectState }),
-			});
-		} catch (error) {
-			console.error("Failed to toggle logging state:", error);
-		}
-	}
-
-	/**
-	 * Simulates connecting to the device.
-	 */
-	function connect() {
-		connectBtn.disabled = true;
-		connectBtn.innerHTML = `
-            <i class="fas fa-spinner fa-spin"></i>
-            <span>Connecting...</span>`;
-
-		setTimeout(() => {
-			isConnected = true;
-			toggleLogging(true);
-			connectBtn.disabled = false;
-			connectBtn.innerHTML = `
-                <i class="fas fa-check-circle text-green-500"></i>
-                <span>Connected</span>`;
-			connectBtn.classList.add("bg-green-100");
-
-			initialMessage.classList.add("hidden");
-			dataDisplayArea.classList.remove("hidden");
-
-			fetchData();
-			dataInterval = setInterval(fetchData, 1000);
-		}, 2000);
-	}
-
-	/**
-	 * Disconnects from the device.
-	 */
-	function disconnect() {
-		isConnected = false;
-		clearInterval(dataInterval);
-		toggleLogging(false);
-
-		connectBtn.innerHTML = `
-             <i class="fas fa-satellite-dish text-blue-500"></i>
-             <span>Connect to Fitbit</span>`;
-		connectBtn.classList.remove("bg-green-100");
-
-		dataDisplayArea.classList.add("hidden");
-		initialMessage.classList.remove("hidden");
-	}
-
-	/**
-	 * Toggles the visibility of the raw data section.
-	 */
-	function toggleRawDataSection() {
-		const isCollapsed =
-			rawDataContent.style.maxHeight &&
-			rawDataContent.style.maxHeight !== "0px";
-		if (isCollapsed) {
-			rawDataContent.style.maxHeight = "0px";
-			toggleIcon.classList.remove("rotate-180");
-		} else {
-			rawDataContent.style.maxHeight = rawDataContent.scrollHeight + "px";
-			toggleIcon.classList.add("rotate-180");
-		}
-	}
-
-	/**
-	 * Fetches data from the backend and updates the UI.
-	 */
-	async function fetchData() {
-		if (!isConnected) return;
-		try {
-			const response = await fetch("/get_data");
-			if (!response.ok)
-				throw new Error(`HTTP error! status: ${response.status}`);
-			const data = await response.json();
-			updateUIs(data);
-		} catch (error) {
-			console.error("Could not fetch data:", error);
-			disconnect();
-		}
-	}
-
-	/**
-	 * Main function to call all UI update functions.
-	 */
-	function updateUIs(data) {
-		const timestamp = new Date().toLocaleTimeString();
-		updateRawDataLog(data.generatedData);
-		updateTransformedDataTable(timestamp, data.generatedData);
-		updateModelsGrid(data.modelScores);
-		updateScoreLogTable(timestamp, data.modelScores);
-	}
-
-	function updateRawDataLog(gData) {
-		rawDataLog.textContent = JSON.stringify(gData, null, 2);
-	}
-
-	function updateTransformedDataTable(timestamp, gData) {
-		const newRow = document.createElement("tr");
-		newRow.className = "border-b hover:bg-slate-50";
-		// Dynamically create all table cells based on the feature list
-		newRow.innerHTML = `
-            <td class="p-2 text-sm whitespace-nowrap sticky left-0 bg-white hover:bg-slate-50">${timestamp}</td>
-            <td class="p-2 text-sm whitespace-nowrap">${gData.ECG.toFixed(
-				4
-			)}</td>
-            <td class="p-2 text-sm whitespace-nowrap">${gData.EDA.toFixed(
-				4
-			)}</td>
-            <td class="p-2 text-sm whitespace-nowrap">${gData.Temp.toFixed(
-				2
-			)}</td>
-            <td class="p-2 text-sm whitespace-nowrap">${gData.Resp.toFixed(
-				4
-			)}</td>
-            <td class="p-2 text-sm whitespace-nowrap">${gData.EMG.toFixed(
-				4
-			)}</td>
-            <td class="p-2 text-sm whitespace-nowrap">${gData.ACC_x.toFixed(
-				4
-			)}</td>
-            <td class="p-2 text-sm whitespace-nowrap">${gData.ACC_y.toFixed(
-				4
-			)}</td>
-            <td class="p-2 text-sm whitespace-nowrap">${gData.ACC_z.toFixed(
-				4
-			)}</td>
-            <td class="p-2 text-sm whitespace-nowrap">${gData.ACC_mag.toFixed(
-				4
-			)}</td>
-            <td class="p-2 text-sm whitespace-nowrap">${gData.BVP.toFixed(
-				4
-			)}</td>
-            <td class="p-2 text-sm whitespace-nowrap">${gData.HR.toFixed(
-				1
-			)}</td>
-            <td class="p-2 text-sm whitespace-nowrap">${gData.IBI.toFixed(
-				3
-			)}</td>
-            <td class="p-2 text-sm whitespace-nowrap">${gData.Resp_rate.toFixed(
-				2
-			)}</td>
-        `;
-		transformedDataBody.prepend(newRow);
-		if (transformedDataBody.rows.length > MAX_TRANSFORMED_ENTRIES) {
-			transformedDataBody.deleteRow(-1);
-		}
-	}
-
-	function updateModelsGrid(scores) {
-		const scoreConfig = {
-			SleepQualityIndex: { name: "Sleep Quality Index", icon: "fa-bed" },
-			PsychosomaticStressIndex: {
-				name: "Psychosomatic Stress",
-				icon: "fa-brain",
-			},
-			CognitiveLoadScore: {
-				name: "Cognitive Load",
-				icon: "fa-head-side-virus",
-			},
-			CardiovascularHealthIndex: {
-				name: "Cardiovascular Health",
-				icon: "fa-heart-pulse",
-			},
-			EmotionalVitalityScore: {
-				name: "Emotional Vitality",
-				icon: "fa-smile-beam",
-			},
+	// 1. Initialize all plot objects
+	try {
+		allPlots = {
+			hr: new HrPlot(),
+			ibi: new IbiPlot(),
+			spo2: new Spo2Plot(),
+			skinTemp: new SkinTempPlot(),
+			eda: new EdaPlot(),
+			ecg: new EcgPlot(),
+			bvp: new BvpPlot(),
+			ppgGreen: new PpgGreenPlot(),
+			ppgRed: new PpgRedPlot(),
+			ppgIr: new PpgIrPlot(),
+			accX: new AccXPlot(),
+			accY: new AccYPlot(),
+			accZ: new AccZPlot(),
+			respirationRate: new RespirationRatePlot(),
 		};
-
-		let gridHTML = "";
-		for (const key in scores) {
-			const score = scores[key];
-			const config = scoreConfig[key];
-			const colorClass =
-				score > 70
-					? "text-green-500"
-					: score > 50
-					? "text-yellow-500"
-					: "text-red-500";
-
-			gridHTML += `
-                <div class="bg-white p-5 rounded-xl shadow-lg flex items-start gap-4">
-                    <div class="bg-blue-100 text-blue-600 p-3 rounded-lg text-xl">
-                        <i class="fas ${config.icon}"></i>
-                    </div>
-                    <div>
-                        <h3 class="font-semibold text-slate-600">${
-							config.name
-						}</h3>
-                        <p class="text-3xl font-bold ${colorClass}">${score.toFixed(
-				2
-			)}</p>
-                    </div>
-                </div>
-            `;
+	} catch (error) {
+		console.error(
+			"Fatal Error: Could not initialize charts. Is Chart.js loaded?",
+			error
+		);
+		if (ui && ui.updateSyncStatus) {
+			ui.updateSyncStatus("Error: Failed to load charts.", "error");
 		}
-		modelsGrid.innerHTML = gridHTML;
+		return; // Stop if charts can't be made
 	}
 
-	function updateScoreLogTable(timestamp, scores) {
-		const newRow = document.createElement("tr");
-		newRow.className = "border-b hover:bg-slate-50";
-		newRow.innerHTML = `
-            <td class="p-3 text-sm">${timestamp}</td>
-            <td class="p-3">${scores.SleepQualityIndex.toFixed(2)}</td>
-            <td class="p-3">${scores.PsychosomaticStressIndex.toFixed(2)}</td>
-            <td class="p-3">${scores.CognitiveLoadScore.toFixed(2)}</td>
-            <td class="p-3">${scores.CardiovascularHealthIndex.toFixed(2)}</td>
-            <td class="p-3">${scores.EmotionalVitalityScore.toFixed(2)}</td>
-        `;
-		scoreLogBody.prepend(newRow);
-		if (scoreLogBody.rows.length > MAX_SCORE_LOG_ENTRIES) {
-			scoreLogBody.deleteRow(-1);
-		}
+	// 2. Attach main event listeners
+	if (ui.dom.connectBtn) {
+		ui.dom.connectBtn.addEventListener("click", handleConnectionToggle);
+	} else {
+		console.error("Fatal Error: connectBtn not found in DOM.");
+		return;
+	}
+
+	if (ui.dom.loadHistoryBtn) {
+		ui.dom.loadHistoryBtn.addEventListener("click", loadHistoricalData);
+	}
+
+	if (ui.dom.goLiveBtn) {
+		ui.dom.goLiveBtn.addEventListener("click", startLiveMode);
 	}
 });
+
+// --- Connection Management ---
+
+function handleConnectionToggle() {
+	if (isConnected) {
+		stopLiveMode();
+	} else {
+		startLiveMode();
+	}
+}
+
+async function startLiveMode() {
+	if (isConnected) return;
+
+	ui.dom.connectBtn.disabled = true;
+	ui.dom.connectBtn.innerHTML = `<i class="fas fa-spinner fa-spin"></i> <span>Connecting...</span>`;
+	ui.updateSyncStatus("Fetching initial data (last 100 points)...");
+
+	try {
+		const initialData = await api.fetchInitialData();
+
+		loadDataIntoUI(initialData, "Live Data (Last 100 Points)");
+
+		isConnected = true;
+		api.toggleLogging(true);
+
+		// Update UI to "Connected" state
+		ui.dom.connectBtn.disabled = false;
+		ui.dom.connectBtn.innerHTML = `<i class="fas fa-check-circle text-green-500"></i> <span>Connected</span>`;
+		ui.dom.connectBtn.classList.add("bg-green-100");
+		ui.dom.initialMessage.classList.add("hidden");
+		ui.dom.dataDisplayArea.classList.remove("hidden");
+		ui.dom.dateRangeSelector.classList.remove("hidden");
+		ui.dom.goLiveBtn.classList.add("hidden");
+		ui.updateSyncStatus("Connection established. Starting live poll...");
+
+		if (dataInterval) clearInterval(dataInterval);
+		// Set to 5 seconds
+		dataInterval = setInterval(pollLiveData, 5000);
+	} catch (error) {
+		console.error("Failed to connect:", error);
+		ui.updateSyncStatus(`Connection failed: ${error.message}`, "error");
+		ui.dom.connectBtn.disabled = false;
+		ui.dom.connectBtn.innerHTML = `<i class="fas fa-satellite-dish text-blue-500"></i> <span>Connect to Device</span>`;
+	}
+}
+
+function stopLiveMode() {
+	if (!isConnected) return;
+	isConnected = false;
+	if (dataInterval) clearInterval(dataInterval);
+	dataInterval = null;
+	api.toggleLogging(false);
+
+	// Reset UI to "Disconnected" state
+	ui.dom.connectBtn.innerHTML = `<i class="fas fa-satellite-dish text-blue-500"></i> <span>Connect to Device</span>`;
+	ui.dom.connectBtn.classList.remove("bg-green-100");
+	ui.dom.dataDisplayArea.classList.add("hidden");
+	ui.dom.dateRangeSelector.classList.add("hidden");
+	ui.dom.initialMessage.classList.remove("hidden");
+	if (ui.dom.syncStatusEl) {
+		ui.dom.syncStatusEl.classList.add("hidden");
+	}
+
+	// Reset all plots
+	for (const key of CHART_FEATURES) {
+		if (allPlots[key]) {
+			allPlots[key].reset();
+		}
+	}
+}
+
+// --- Data Fetching and UI Updating ---
+
+async function pollLiveData() {
+	if (!isConnected) return;
+	try {
+		const data = await api.fetchLiveData();
+		if (data.error) {
+			ui.updateSyncStatus(data.error, "error");
+			return;
+		}
+
+		if (data.synced === false) {
+			ui.updateSyncStatus(
+				`Waiting for new data. Last check: ${new Date(
+					data.lastPollTime
+				).toLocaleTimeString()}`,
+				"warn"
+			);
+		} else {
+			ui.updateSyncStatus(
+				`Data synced. Last update: ${new Date(
+					data.lastPollTime
+				).toLocaleTimeString()}`,
+				"info"
+			);
+
+			// Send new data to all UI components
+			const gData = data.generatedData;
+			for (const key of CHART_FEATURES) {
+				if (allPlots[key] && gData[key] !== undefined) {
+					allPlots[key].addPoint({
+						x: gData.timestamp,
+						y: gData[key],
+					});
+				}
+			}
+			ui.addSingleDataToTables(data);
+		}
+	} catch (error) {
+		console.error("Could not fetch live data:", error);
+		ui.updateSyncStatus("Live data poll failed.", "error");
+	}
+}
+
+async function loadHistoricalData() {
+	const start = ui.dom.startTimeEl.value
+		? new Date(ui.dom.startTimeEl.value).getTime()
+		: null;
+	const end = ui.dom.endTimeEl.value
+		? new Date(ui.dom.endTimeEl.value).getTime()
+		: null;
+
+	if (!start || !end) {
+		ui.updateSyncStatus("Please select both a start and end time.", "warn");
+		return;
+	}
+
+	if (dataInterval) clearInterval(dataInterval);
+	dataInterval = null;
+	ui.updateSyncStatus(`Loading historical data...`);
+
+	try {
+		const historicalData = await api.loadHistoricalRange(start, end);
+
+		loadDataIntoUI(
+			historicalData,
+			`Historical Data (${historicalData.length} records)`
+		);
+
+		ui.updateSyncStatus(
+			`Loaded ${historicalData.length} historical records.`
+		);
+		ui.dom.goLiveBtn.classList.remove("hidden");
+	} catch (error) {
+		console.error("Failed to load history:", error);
+		ui.updateSyncStatus(
+			`Failed to load history: ${error.message}`,
+			"error"
+		);
+	}
+}
+
+// --- Helper function to load a batch of data ---
+function loadDataIntoUI(records, title) {
+	// 1. Update titles
+	if (ui.dom.dataStreamTitle) {
+		ui.dom.dataStreamTitle.textContent = `${title} (Last 10 shown)`;
+	}
+	if (ui.dom.plotSectionTitle) {
+		ui.dom.plotSectionTitle.textContent = title;
+	}
+
+	// 2. Load data into all plots
+	for (const key of CHART_FEATURES) {
+		if (allPlots[key]) {
+			// Ensure data exists, default to 0 if not present for a given record
+			const plotData = records.map((r) => ({
+				x: r.timestamp,
+				y: r[key] !== undefined ? r[key] : 0,
+			}));
+			allPlots[key].loadHistory(plotData);
+		}
+	}
+
+	// 3. Populate tables
+	if (records.length > 0) {
+		ui.populateInitialTables(records);
+	}
+}

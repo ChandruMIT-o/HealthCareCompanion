@@ -1,34 +1,36 @@
 import os
 import csv
 import time
-import joblib
 import warnings
 from datetime import datetime
+import threading
 
 import numpy as np
 import pandas as pd
-import tensorflow as tf
-from tensorflow.keras import layers, Model
-from sklearn.preprocessing import StandardScaler
+import firebase_admin
+from firebase_admin import credentials, db
 
 from flask import Flask, jsonify, render_template, request
 
 # --- Suppress Warnings ---
 warnings.filterwarnings('ignore')
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Suppress TensorFlow INFO messages
 
 # --- Flask App Initialization ---
 app = Flask(__name__)
 
 # --- Global Variables ---
 is_logging = False
-data_generator = None
 log_file_path = "fitbit_data_log.csv"
 
+# Thread-safe data store for the latest data packet
+latest_data_packet = {}
+data_lock = threading.Lock()
+last_known_timestamp = None # To track if data is new
+
 # --- Feature and Model Definitions ---
-FEATURE_COLS = [
-    'ECG', 'EDA', 'Temp', 'Resp', 'EMG', 'ACC_x', 'ACC_y', 'ACC_z',
-    'ACC_mag', 'BVP', 'HR', 'IBI', 'Resp_rate'
+TARGET_FEATURES = [
+    'hr', 'ibi', 'spo2', 'skinTemp', 'eda', 'ecg', 'bvp', 'ppgGreen',
+    'ppgRed', 'ppgIr', 'accX', 'accY', 'accZ', 'respirationRate', 'timestamp' # Added timestamp
 ]
 MODEL_SCORES_KEYS = [
     "SleepQualityIndex", "PsychosomaticStressIndex", "CognitiveLoadScore",
@@ -36,67 +38,118 @@ MODEL_SCORES_KEYS = [
 ]
 
 # ================================
-# LSTM Variational Autoencoder (User Provided)
+# 1. FIREBASE INITIALIZATION
 # ================================
-class LSTM_VAE(Model):
-    def __init__(self, input_dim, latent_dim=16, seq_len=60):
-        super(LSTM_VAE, self).__init__()
-        self.seq_len = seq_len
-        self.input_dim = input_dim
-        # Encoder
-        self.encoder_lstm = layers.LSTM(64, return_sequences=False)
-        self.z_mean = layers.Dense(latent_dim)
-        self.z_log_var = layers.Dense(latent_dim)
-        # Decoder
-        self.decoder_lstm = layers.LSTM(64, return_sequences=True)
-        self.decoder_out = layers.TimeDistributed(layers.Dense(input_dim))
+try:
+    cred = credentials.Certificate("servicekey.json")
+    firebase_admin.initialize_app(cred, {
+        "databaseURL": "https://healthdatasync-b0458-default-rtdb.asia-southeast1.firebasedatabase.app/"
+    })
+    ref = db.reference("/health_data_stream")
+    print("Firebase Admin SDK initialized successfully.")
+except Exception as e:
+    print(f"ERROR: Could not initialize Firebase. Is 'servicekey.json' present? \n{e}")
+    ref = None
 
-    def encode(self, x):
-        h = self.encoder_lstm(x)
-        z_mean = self.z_mean(h)
-        z_log_var = self.z_log_var(h)
-        eps = tf.random.normal(shape=tf.shape(z_mean))
-        z = z_mean + tf.exp(0.5 * z_log_var) * eps
-        return z, z_mean, z_log_var
+# ================================
+# 2. HELPER FUNCTION TO PROCESS RECORDS
+# ================================
+# ================================
+# 2. HELPER FUNCTION TO PROCESS RECORDS
+# ================================
+# ================================
+# 2. HELPER FUNCTION TO PROCESS RECORDS
+# ================================
+def process_record(record_dict):
+    """
+    Cleans a single data record from Firebase.
+    Handles 'ibi' array and ensures all keys are present.
+    """
+    processed = {}
+    
+    # --- First pass: Process all values as normal ---
+    for key in TARGET_FEATURES:
+        value = record_dict.get(key, 0)
+        
+        if key == 'ibi':
+            if isinstance(value, list) and len(value) > 0:
+                processed[key] = float(value[0])
+            elif isinstance(value, list):
+                processed[key] = 0.0
+            else:
+                processed[key] = float(value)
+        elif pd.isna(value):
+            processed[key] = 0.0
+        else:
+            try:
+                processed[key] = float(value)
+            except (ValueError, TypeError):
+                processed[key] = 0.0
 
-    def decode(self, z):
-        z_repeated = tf.repeat(tf.expand_dims(z, 1), self.seq_len, axis=1)
-        h = self.decoder_lstm(z_repeated)
-        return self.decoder_out(h)
+    # --- NEW: Apply the zero HR rule ---
+    # If heart rate is 0, zero out other physiological sensors
+    if processed.get('hr', 0) == 0:
+        # Keys to PRESERVE (keep their values)
+        preserve_keys = {'hr', 'accX', 'accY', 'accZ', 'timestamp'}
+        
+        for key in processed:
+            if key not in preserve_keys:
+                processed[key] = 0.0
+                
+    return processed
 
-    def call(self, x):
-        z, z_mean, z_log_var = self.encode(x)
-        x_recon = self.decode(z)
-        return x_recon, z_mean, z_log_var
-
-# --- Data Generator (User Provided) ---
-def synthetic_data_generator(model, scaler, feature_cols, seq_len=60, delay=1.0, latent_dim=16):
-    """Streams synthetic wearable data records in *real physiological units*."""
+# ================================
+# 3. BACKGROUND POLLING THREAD (MODIFIED)
+# ================================
+def poll_firebase_for_data(interval_seconds=5):
+    """
+    Runs in a background thread to poll for the *single latest* data point.
+    """
+    global latest_data_packet, last_known_timestamp
     while True:
-        z = tf.random.normal(shape=(1, latent_dim))
-        seq_scaled = model.decode(z).numpy()[0]
-        seq_real = scaler.inverse_transform(seq_scaled)
+        if not ref:
+            print("Firebase ref not available, skipping poll.")
+            time.sleep(interval_seconds)
+            continue
+            
+        try:
+            # OPTIMIZED: Get only the single last record
+            raw_data = ref.order_by_child('timestamp').limit_to_last(1).get()
+            
+            if not raw_data:
+                print("No data in Firebase.")
+                with data_lock:
+                    latest_data_packet['synced'] = False
+                time.sleep(interval_seconds)
+                continue
 
-        for i in range(seq_len):
-            record = {col: seq_real[i, j] for j, col in enumerate(feature_cols)}
-            record['HR'] = record['HR']
-            record['EDA'] = record['EDA']
-            record['Temp'] = record['Temp']
-            record['Resp_rate'] = record['Resp_rate']
-            yield record
-            time.sleep(delay)
+            # Extract the single record
+            key, new_record = list(raw_data.items())[0]
+            new_timestamp = new_record.get('timestamp')
 
-def load_model_and_scaler():
-    """Loads the VAE model and scaler, creating dummy files if needed."""
-    scaler = joblib.load("scaler.pkl")
-    model = LSTM_VAE(input_dim=len(FEATURE_COLS), latent_dim=16, seq_len=60)
-    model.build(input_shape=(None, 60, len(FEATURE_COLS)))
-    model.load_weights("vae_weights.h5")
-    return model, scaler
+            # Check if this is new data
+            if new_timestamp == last_known_timestamp:
+                # Data is the same, just update status
+                with data_lock:
+                    latest_data_packet['synced'] = False
+                    latest_data_packet['lastPollTime'] = datetime.now().isoformat()
+            else:
+                # We have new data!
+                print(f"New data found. Timestamp: {new_timestamp}")
+                last_known_timestamp = new_timestamp
+                with data_lock:
+                    latest_data_packet = {
+                        'data': new_record,
+                        'synced': True,
+                        'lastPollTime': datetime.now().isoformat()
+                    }
+                    
+        except Exception as e:
+            print(f"Error polling Firebase: {e}")
+            with data_lock:
+                latest_data_packet['synced'] = False
 
-# Load model and initialize generator
-model_loaded, scaler_loaded = load_model_and_scaler()
-data_generator = synthetic_data_generator(model_loaded, scaler_loaded, FEATURE_COLS)
+        time.sleep(interval_seconds)
 
 # --- Data Logging ---
 def log_data(data_to_log):
@@ -116,34 +169,74 @@ def index():
 
 @app.route('/get_data')
 def get_data():
-    """API endpoint to fetch the latest generated sensor data."""
+    """API endpoint for *live* data (fetches the latest packet)."""
     global is_logging
     
-    # Get data from the generator
-    generated_data = next(data_generator)
+    with data_lock:
+        data_packet = latest_data_packet.copy()
 
-    # Clean up data types for JSON serialization
-    for key, value in generated_data.items():
-        if isinstance(value, (np.float32, np.float64)):
-            generated_data[key] = float(value)
-        elif isinstance(value, (np.int32, np.int64)):
-            generated_data[key] = int(value)
+    if not data_packet or 'data' not in data_packet:
+        return jsonify({"error": "No data available from Firebase yet."}), 503
 
-    # Generate model scores
+    # Process the raw record
+    processed_data = process_record(data_packet['data'])
+
+    # Generate model scores (still random)
     model_scores = {key: round(np.random.uniform(30, 95), 2) for key in MODEL_SCORES_KEYS}
 
-    # Prepare data for logging if connected
-    if is_logging:
+    # Log data *only* if logging is on AND the data was new
+    if is_logging and data_packet.get('synced', False):
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
         log_entry = {'Timestamp': timestamp}
-        log_entry.update(generated_data)
+        log_entry.update(processed_data) 
         log_entry.update(model_scores)
         log_data(log_entry)
 
     return jsonify({
-        "generatedData": generated_data,
-        "modelScores": model_scores
+        "generatedData": processed_data,
+        "modelScores": model_scores,
+        "synced": data_packet.get('synced', False),
+        "lastPollTime": data_packet.get('lastPollTime')
     })
+
+# NEW ROUTE: For initial load (last 100) and historical range
+@app.route('/get_historical_data')
+def get_historical_data():
+    """
+    Fetches historical data.
+    If 'start' and 'end' params are provided, fetches that range.
+    Otherwise, fetches the last 100 records.
+    """
+    if not ref:
+        return jsonify({"error": "Firebase not connected"}), 500
+
+    start = request.args.get('start', type=int)
+    end = request.args.get('end', type=int)
+
+    try:
+        if start and end:
+            print(f"Fetching historical data from {start} to {end}")
+            query = ref.order_by_child('timestamp').start_at(start).end_at(end)
+        else:
+            print("Fetching last 100 records for initial load.")
+            query = ref.order_by_child('timestamp').limit_to_last(100)
+        
+        raw_data = query.get()
+
+        if not raw_data:
+            return jsonify([]) # Return empty list if no data
+
+        # Process all records
+        processed_list = [process_record(record) for key, record in raw_data.items()]
+        # Sort by timestamp, as Firebase dicts aren't ordered
+        processed_list.sort(key=lambda x: x.get('timestamp', 0))
+        
+        return jsonify(processed_list)
+
+    except Exception as e:
+        print(f"Error fetching historical data: {e}")
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route('/toggle_logging', methods=['POST'])
 def toggle_logging():
@@ -152,9 +245,14 @@ def toggle_logging():
     data = request.get_json()
     is_logging = data.get('connect', False)
     status = "started" if is_logging else "stopped"
+    print(f"Logging {status}")
     return jsonify({"message": f"Logging {status}"})
 
 # --- Main Execution ---
 if __name__ == '__main__':
-    app.run(debug=True, use_reloader=False) # use_reloader=False to avoid re-initializing generator
-
+    print("Starting Firebase polling thread...")
+    firebase_thread = threading.Thread(target=poll_firebase_for_data, daemon=True)
+    firebase_thread.start()
+    
+    print("Starting Flask server...")
+    app.run(debug=True, use_reloader=False)
