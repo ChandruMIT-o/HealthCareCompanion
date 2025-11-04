@@ -242,6 +242,95 @@ async function loadHistoricalData() {
 		);
 	}
 }
+// Add auto-refresh for model scores
+function startModelScoresAutoRefresh() {
+    // Refresh immediately when starting
+    fetchModelScores();
+    
+    // Then refresh every 30 seconds
+    setInterval(fetchModelScores, 30000);
+}
+
+// Model Scores Functions
+async function fetchModelScores() {
+    try {
+        const response = await fetch('/get_model_scores');
+        const data = await response.json();
+        
+        if (data.error) {
+            console.error('Error fetching model scores:', data.error);
+            return;
+        }
+
+        // Update the model scores display
+        document.getElementById('model-sqi').textContent = data.modelScores.SleepQualityIndex?.toFixed(1) || '--';
+        document.getElementById('model-psi').textContent = data.modelScores.PsychosomaticStressIndex?.toFixed(1) || '--';
+        document.getElementById('model-cls').textContent = data.modelScores.CognitiveLoadScore?.toFixed(1) || '--';
+        document.getElementById('model-cvhs').textContent = data.modelScores.CardiovascularHealthIndex?.toFixed(1) || '--';
+        document.getElementById('model-evs').textContent = data.modelScores.EmotionalVitalityScore?.toFixed(1) || '--';
+
+        console.log('Model scores updated:', data.modelScores);
+    } catch (error) {
+        console.error('Error fetching model scores:', error);
+    }
+}
+
+async function fetchModelScoresHistorical() {
+    try {
+        const response = await fetch('/get_model_scores_historical_data');
+        const data = await response.json();
+        
+        if (data.error) {
+            console.error('Error fetching historical model scores:', data.error);
+            return;
+        }
+
+        updateModelScoresHistoricalTable(data);
+        console.log('Loaded historical model scores:', data.length, 'records');
+    } catch (error) {
+        console.error('Error fetching historical model scores:', error);
+    }
+}
+
+function updateModelScoresHistoricalTable(data) {
+    const tbody = document.getElementById('model-scores-historical-body');
+    tbody.innerHTML = '';
+
+    if (data.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="6" class="p-4 text-center text-gray-500">
+                    No historical model scores found
+                </td>
+            </tr>
+        `;
+        return;
+    }
+
+    data.forEach(record => {
+        const row = document.createElement('tr');
+        const date = new Date(record.timestamp);
+        
+        row.innerHTML = `
+            <td class="p-3 text-sm">${date.toLocaleString()}</td>
+            <td class="p-3">${record.SleepQualityIndex?.toFixed(1) || '--'}</td>
+            <td class="p-3">${record.PsychosomaticStressIndex?.toFixed(1) || '--'}</td>
+            <td class="p-3">${record.CognitiveLoadScore?.toFixed(1) || '--'}</td>
+            <td class="p-3">${record.CardiovascularHealthIndex?.toFixed(1) || '--'}</td>
+            <td class="p-3">${record.EmotionalVitalityScore?.toFixed(1) || '--'}</td>
+        `;
+        tbody.appendChild(row);
+    });
+}
+
+// Auto-refresh model scores every 30 seconds
+setInterval(fetchModelScores, 30000);
+
+// Load model scores when page loads
+document.addEventListener('DOMContentLoaded', function() {
+    // Load initial model scores after a short delay
+    setTimeout(fetchModelScores, 1000);
+});
 
 // --- Helper function to load a batch of data ---
 function loadDataIntoUI(records, title) {
