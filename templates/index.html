@@ -397,50 +397,92 @@
                         ></div>
                     </section>
 
+                    <!-- Model Scores Dashboard Section -->
                     <section class="bg-white p-6 rounded-xl shadow-lg">
+                        
                         <h2 class="text-xl font-semibold mb-3">
                             Health Score Log (Live Mode)
                         </h2>
+                        <h2 class="text-xl font-semibold mb-4">
+                            Model Scores (30-Second Averages from Firebase)
+                        </h2>
+                    
+                        <!-- Scores Cards -->
+                        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
+                            <div class="bg-blue-50 p-4 rounded-lg text-center">
+                                <div class="text-2xl font-bold text-blue-600 mb-1" id="model-sqi">--</div>
+                                <div class="text-sm text-blue-800 font-medium">Sleep Quality</div>
+                            </div>
+                            <div class="bg-red-50 p-4 rounded-lg text-center">
+                                <div class="text-2xl font-bold text-red-600 mb-1" id="model-psi">--</div>
+                                <div class="text-sm text-red-800 font-medium">Stress Index</div>
+                            </div>
+                            <div class="bg-yellow-50 p-4 rounded-lg text-center">
+                                <div class="text-2xl font-bold text-yellow-600 mb-1" id="model-cls">--</div>
+                                <div class="text-sm text-yellow-800 font-medium">Cognitive Load</div>
+                            </div>
+                            <div class="bg-green-50 p-4 rounded-lg text-center">
+                                <div class="text-2xl font-bold text-green-600 mb-1" id="model-cvhs">--</div>
+                                <div class="text-sm text-green-800 font-medium">Cardio Health</div>
+                            </div>
+                            <div class="bg-purple-50 p-4 rounded-lg text-center">
+                                <div class="text-2xl font-bold text-purple-600 mb-1" id="model-evs">--</div>
+                                <div class="text-sm text-purple-800 font-medium">Emotional Vitality</div>
+                            </div>
+                        </div>
+
+                        <!-- Controls -->
+                        <div class="flex space-x-4 mb-4">
+                            <button onclick="fetchModelScores()" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm">
+                                Refresh Model Scores
+                            </button>
+                            <button onclick="fetchModelScoresHistorical()" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 text-sm">
+                                Load Historical Scores
+                            </button>
+                        </div>
+
+                        <!-- Historical Scores Table -->
                         <div class="overflow-x-auto h-72 custom-scrollbar">
                             <table class="w-full text-left">
                                 <thead>
-                                    <tr
+                                    <tr 
                                         class="border-b bg-slate-50 sticky top-0"
                                     >
-                                        <th class="p-3">Timestamp</th>
-                                        <th class="p-3">Sleep Quality</th>
-                                        <th class="p-3">
-                                            Psychosomatic Stress
-                                        </th>
-                                        <th class="p-3">Cognitive Load</th>
-                                        <th class="p-3">
-                                            Cardiovascular Health
-                                        </th>
-                                        <th class="p-3">Emotional Vitality</th>
+                                    <th class="p-3">Timestamp</th>
+                                    <th class="p-3">Sleep Quality</th>
+                                    <th class="p-3">
+                                        Psychosomatic Stress
+                                    </th>
+                                    <th class="p-3">Cognitive Load</th>
+                                    <th class="p-3">
+                                        Cardiovascular Health
+                                    </th>
+                                    <th class="p-3">Emotional Vitality</th>
                                     </tr>
                                 </thead>
-                                <tbody id="score-log-body"></tbody>
+                                <tbody id="score-log-body"></tbody>                                 
+                                
                             </table>
                         </div>
-                    </section>
-                </div>
-                <div id="initial-message" class="text-center py-20">
-                    <i
-                        class="fas fa-power-off text-6xl text-slate-300 mb-4"
-                    ></i>
-                    <h2 class="text-2xl font-semibold text-slate-600">
-                        Device Disconnected
-                    </h2>
-                    <p class="text-slate-500">
-                        Please connect to a device to start monitoring.
-                    </class=>
-                </div>
-            </main>
-        </div>
+                    </section>                                        
+                    </div>
+                    <div id="initial-message" class="text-center py-20">
+                        <i
+                            class="fas fa-power-off text-6xl text-slate-300 mb-4"
+                        ></i>
+                        <h2 class="text-2xl font-semibold text-slate-600">
+                            Device Disconnected
+                        </h2>
+                        <p class="text-slate-500">
+                            Please connect to a device to start monitoring.
+                        </class=>
+                    </div>
+                </main>
+            </div>
 
-        <script
-            type="module"
-            src="{{ url_for('static', filename='js/main.js') }}"
-        ></script>
-    </body>
-</html>
+            <script
+                type="module"
+                src="{{ url_for('static', filename='js/main.js') }}"
+            ></script>
+        </body>
+    </html>
