@@ -248,6 +248,54 @@ def toggle_logging():
     print(f"Logging {status}")
     return jsonify({"message": f"Logging {status}"})
 
+@app.route('/get_model_scores')
+def get_model_scores():
+    """API endpoint for model scores - returns dynamic scores"""
+    print("GET /get_model_scores - Generating model scores")
+    
+    # Generate dynamic scores that change each time
+    import random
+    model_scores = {
+        "SleepQualityIndex": round(random.uniform(20, 90), 1),
+        "PsychosomaticStressIndex": round(random.uniform(10, 80), 1),
+        "CognitiveLoadScore": round(random.uniform(30, 95), 1),
+        "CardiovascularHealthIndex": round(random.uniform(40, 85), 1),
+        "EmotionalVitalityScore": round(random.uniform(25, 88), 1)
+    }
+    
+    response_data = {
+        "modelScores": model_scores,
+        "synced": True,
+        "lastPollTime": datetime.now().isoformat()
+    }
+    
+    print(f"GET /get_model_scores - Returning scores: {model_scores}")
+    return jsonify(response_data)
+
+@app.route('/get_model_scores_historical_data')
+def get_model_scores_historical_data():
+    """API endpoint for historical model scores - returns sample historical data"""
+    print("GET /get_model_scores_historical_data - Generating historical scores")
+    
+    # Generate sample historical data (last 10 records)
+    import random
+    historical_data = []
+    base_time = int(time.time() * 1000)  # Current timestamp in milliseconds
+    
+    for i in range(10):
+        record = {
+            "timestamp": base_time - (i * 30000),  # 30 seconds apart
+            "SleepQualityIndex": round(random.uniform(20, 90), 1),
+            "PsychosomaticStressIndex": round(random.uniform(10, 80), 1),
+            "CognitiveLoadScore": round(random.uniform(30, 95), 1),
+            "CardiovascularHealthIndex": round(random.uniform(40, 85), 1),
+            "EmotionalVitalityScore": round(random.uniform(25, 88), 1)
+        }
+        historical_data.append(record)
+    
+    print(f"GET /get_model_scores_historical_data - Returning {len(historical_data)} historical records")
+    return jsonify(historical_data)
+
 # --- Main Execution ---
 if __name__ == '__main__':
     print("Starting Firebase polling thread...")
